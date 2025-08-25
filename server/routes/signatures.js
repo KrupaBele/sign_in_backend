@@ -784,4 +784,73 @@ router.get("/sign/:documentId/:email", async (req, res) => {
   }
 });
 
+// Delete signature
+router.delete("/:documentId/signature/:signatureIndex", async (req, res) => {
+  try {
+    const { documentId, signatureIndex } = req.params;
+    const { signerEmail } = req.body;
+
+    const document = await Document.findById(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    // Allow deletion if:
+    // 1. Document is in draft status (owner can delete)
+    // 2. Document is sent and user is deleting their own signature during signing process
+    const isOwnerDeletingFromDraft =
+      document.status === "draft" && document.ownerEmail === signerEmail;
+    const isRecipientDeletingOwnSignature =
+      document.status === "sent" &&
+      document.recipients.some(
+        (r) => r.email === signerEmail && r.status !== "signed"
+      );
+
+    if (!isOwnerDeletingFromDraft && !isRecipientDeletingOwnSignature) {
+      return res
+        .status(400)
+        .json({ error: "Cannot delete signatures at this stage" });
+    }
+
+    // Verify the signature belongs to the requesting user
+    const signatureToDelete = document.signatures[signatureIndex];
+    if (!signatureToDelete || signatureToDelete.signerEmail !== signerEmail) {
+      return res
+        .status(403)
+        .json({ error: "Not authorized to delete this signature" });
+    }
+
+    // Remove the signature
+    document.signatures.splice(signatureIndex, 1);
+
+    // Handle PDF regeneration based on document status
+    if (document.status === "draft") {
+      // For draft documents, regenerate or remove signed PDF
+      if (document.signatures.length === 0) {
+        document.signedUrl = undefined;
+      } else {
+        try {
+          const signedPdfUrl = await generateSignedPDF(document);
+          document.signedUrl = signedPdfUrl;
+        } catch (pdfError) {
+          console.error("PDF regeneration error:", pdfError);
+        }
+      }
+    } else if (document.status === "sent") {
+      // For sent documents, don't regenerate PDF until all recipients finish signing
+      // The PDF will be generated when the signing process is completed
+    }
+
+    await document.save();
+
+    res.json({
+      success: true,
+      document,
+    });
+  } catch (error) {
+    console.error("Delete signature error:", error);
+    res.status(500).json({ error: "Failed to delete signature" });
+  }
+});
+
 export default router;
