@@ -60,40 +60,55 @@ export async function generateSignedPDF(document) {
 
             // FIXED COORDINATE CONVERSION:
             // The key issue was that we need to account for the actual rendered size
-            // In our scrollable view, each page maintains its aspect ratio within 600px width
+            // In our scrollable view, each page maintains its aspect ratio within base width (600px)
+            // Coordinates are always stored relative to the base width regardless of zoom level
+            // Calculate the display dimensions that match the frontend
+            const baseDisplayWidth = 600; // This is our reference width in the frontend
             const aspectRatio = pageHeight / pageWidth;
-            const displayWidth = 600;
-            const displayHeight = displayWidth * aspectRatio;
+            const baseDisplayHeight = baseDisplayWidth * aspectRatio;
 
-            // Calculate the scale factors
-            const scaleX = pageWidth / displayWidth;
-            const scaleY = pageHeight / displayHeight;
+            // Calculate scale factors from display coordinates to PDF coordinates
+            const scaleX = pageWidth / baseDisplayWidth;
+            const scaleY = pageHeight / baseDisplayHeight;
 
-            // Convert coordinates - PDF uses bottom-left origin, web uses top-left
-            const pdfX = signature.position.x * scaleX;
-            const pdfY = pageHeight - signature.position.y * scaleY;
+            // Convert normalized coordinates to PDF coordinates
+            // signature.position.x and y are already normalized to base coordinates (600px width)
+            const scaledX = signature.position.x * scaleX;
+            const scaledY = signature.position.y * scaleY;
+
+            // Convert from top-left origin (web) to bottom-left origin (PDF)
+            const pdfX = scaledX;
+            const pdfY = pageHeight - scaledY;
 
             // Center the signature around the click point
+            const centeredX = pdfX - signatureWidth / 2;
+            const centeredY = pdfY - signatureHeight / 2;
+
+            // Ensure signature stays within page bounds
             const finalX = Math.max(
               0,
-              Math.min(pageWidth - signatureWidth, pdfX - signatureWidth / 2)
+              Math.min(pageWidth - signatureWidth, centeredX)
             );
             const finalY = Math.max(
               0,
-              Math.min(pageHeight - signatureHeight, pdfY - signatureHeight / 2)
+              Math.min(pageHeight - signatureHeight, centeredY)
             );
 
             console.log("Coordinate conversion:", {
-              clickX: signature.position.x,
-              clickY: signature.position.y,
+              storedX: signature.position.x,
+              storedY: signature.position.y,
               pageWidth,
               pageHeight,
-              displayWidth,
-              displayHeight,
+              baseDisplayWidth,
+              baseDisplayHeight,
               scaleX,
               scaleY,
+              scaledX,
+              scaledY,
               pdfX,
               pdfY,
+              centeredX,
+              centeredY,
               finalX,
               finalY,
             });
