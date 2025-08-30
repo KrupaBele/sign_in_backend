@@ -853,4 +853,51 @@ router.delete("/:documentId/signature/:signatureIndex", async (req, res) => {
   }
 });
 
+// Update signature position
+router.put("/:documentId/update-position", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const { signatureIndex, position, signerEmail } = req.body;
+
+    const document = await Document.findById(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    // Verify the signature exists and belongs to the user
+    if (
+      !document.signatures[signatureIndex] ||
+      document.signatures[signatureIndex].signerEmail !== signerEmail
+    ) {
+      return res
+        .status(403)
+        .json({ error: "Not authorized to update this signature" });
+    }
+
+    // Update signature position
+    document.signatures[signatureIndex].position = position;
+
+    // Regenerate signed PDF if document owner is updating their signature
+    if (signerEmail === document.ownerEmail && document.status === "draft") {
+      try {
+        const { generateSignedPDF } = await import("../utils/pdfGenerator.js");
+        const signedPdfUrl = await generateSignedPDF(document);
+        document.signedUrl = signedPdfUrl;
+      } catch (pdfError) {
+        console.error("PDF regeneration error:", pdfError);
+      }
+    }
+
+    await document.save();
+
+    res.json({
+      success: true,
+      document,
+    });
+  } catch (error) {
+    console.error("Update position error:", error);
+    res.status(500).json({ error: "Failed to update signature position" });
+  }
+});
+
 export default router;
