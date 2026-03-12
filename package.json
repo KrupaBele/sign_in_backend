@@ -7,6 +7,7 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "axios": "^1.11.0",
     "cloudinary": "^2.7.0",
     "cors": "^2.8.5",
@@ -16,7 +17,8 @@
     "multer": "^2.0.2",
     "nodemailer": "^7.0.5",
     "openai": "^6.27.0",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "resend": "^6.9.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

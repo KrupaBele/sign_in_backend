@@ -1,16 +1,15 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.BREVO_USER,   // your Brevo account email
-    pass: process.env.BREVO_PASS,   // Brevo SMTP key (not your login password)
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-export default transporter;
+export async function sendEmail({ from, to, subject, html }) {
+  return resend.emails.send({
+    from: from || `DocuSign Pro <onboarding@resend.dev>`,
+    to,
+    subject,
+    html,
+  });
+}
