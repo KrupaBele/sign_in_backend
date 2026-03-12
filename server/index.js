@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import documentRoutes from "./routes/documents.js";
 import signatureRoutes from "./routes/signatures.js";
 import emailRoutes from "./routes/email.js";
+import aiRoutes from "./routes/ai.js";
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ mongoose
 app.use("/api/documents", documentRoutes);
 app.use("/api/signatures", signatureRoutes);
 app.use("/api/email", emailRoutes);
+app.use("/api/ai", aiRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
