@@ -26,6 +26,7 @@ router.post("/send/:documentId", async (req, res) => {
 
       return sendEmail({
         to: recipient.email,
+        toName: recipient.name,
         subject: `Please sign: ${document.title}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

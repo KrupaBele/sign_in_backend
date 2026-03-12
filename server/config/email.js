@@ -1,15 +1,35 @@
-import { Resend } from "resend";
+import axios from "axios";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+export async function sendEmail({ to, subject, html, toName = "" }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) throw new Error("BREVO_API_KEY is not set");
 
-export async function sendEmail({ from, to, subject, html }) {
-  return resend.emails.send({
-    from: from || `DocuSign Pro <onboarding@resend.dev>`,
-    to,
-    subject,
-    html,
-  });
+  const response = await axios.post(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      sender: {
+        name: "DocuSign Pro",
+        email: process.env.EMAIL_USER,
+      },
+      to: [
+        {
+          email: to,
+          name: toName || to,
+        },
+      ],
+      subject,
+      htmlContent: html,
+    },
+    {
+      headers: {
+        "api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  return response.data;
 }
