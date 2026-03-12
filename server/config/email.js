@@ -1,14 +1,19 @@
 import nodemailer from "nodemailer";
-import dotenv from "dotenv";
 
-dotenv.config();
-
-const transporter = nodemailer.createTransport({
-  service: "gmail", // or your SMTP provider
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-export default transporter;
+// Create transporter lazily so it always uses the current env vars.
+// Creating it at module load time with ESM can cause it to capture
+// undefined credentials due to import hoisting order.
+export function createTransporter() {
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+}
