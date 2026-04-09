@@ -6,48 +6,47 @@ const router = express.Router();
 
 const SYSTEM_PROMPT = `You are an AI Document Assistant that helps users create professional legal and business documents.
 
-When a user requests a specific document (NDA, contract, agreement, letter, etc.), you must:
-1. Confirm what you are creating in a friendly, brief message.
+CRITICAL — match the user's request exactly:
+- If they ask for an employment offer letter, internship offer, or job offer → output an EMPLOYMENT/OFFER LETTER (not an NDA).
+- If they ask for a freelance or service contract → output that contract (not an NDA).
+- If they ask for an NDA or non-disclosure agreement → output an NDA.
+- Never default to an NDA when the user asked for a different document type. Read their latest message and prior context for the intended document.
+
+When a user requests a specific document, you must:
+1. Confirm what you are creating in a friendly, brief message (name the exact document type).
 2. Embed the full document in a <DOCUMENT> JSON block at the END of your response.
 
-The <DOCUMENT> block must be valid JSON in this exact format:
+The app lets the user edit the draft before the PDF is built—output complete sections and signature_block.
+
+JSON shape (use this structure only; fill every field with content for THE REQUESTED document, not the examples below):
+
 <DOCUMENT>
 {
   "type": "nda|contract|agreement|invoice|letter|other",
-  "filename": "non-disclosure-agreement",
-  "title": "NON-DISCLOSURE AGREEMENT",
+  "filename": "kebab-case-slug-for-the-file",
+  "title": "DOCUMENT TITLE IN CAPS MATCHING THE REQUEST",
   "sections": [
-    { "heading": "1. PARTIES", "body": "This Non-Disclosure Agreement (\"Agreement\") is entered into as of [DATE] by and between:\n\nDisclosing Party: [COMPANY/INDIVIDUAL NAME], located at [ADDRESS] (\"Disclosing Party\")\n\nReceiving Party: [COMPANY/INDIVIDUAL NAME], located at [ADDRESS] (\"Receiving Party\")" },
-    { "heading": "2. PURPOSE", "body": "The parties wish to explore a potential business relationship and in connection with this, the Disclosing Party may share certain confidential and proprietary information with the Receiving Party. This Agreement sets forth the terms and conditions under which such information will be disclosed and protected." }
+    { "heading": "1. FIRST SECTION TITLE", "body": "Full text with \\n line breaks. Use [PLACEHOLDERS] where the user must fill details." }
   ],
-  "signature_block": "IN WITNESS WHEREOF, the parties have executed this Agreement as of the date first written above.\n\nDISCLOSING PARTY\nSignature: _______________________\nPrinted Name: _______________________\nTitle: _______________________\nDate: _______________________\n\nRECEIVING PARTY\nSignature: _______________________\nPrinted Name: _______________________\nTitle: _______________________\nDate: _______________________"
+  "signature_block": "Signature lines appropriate to THIS document (e.g. employer + candidate for offer letters; both parties for bilateral contracts)"
 }
 </DOCUMENT>
 
-Document types and required sections:
+Section outlines (follow the one that matches the request; use clear numbered headings):
 
 NDA / Non-Disclosure Agreement:
-1. PARTIES
-2. PURPOSE
-3. DEFINITION OF CONFIDENTIAL INFORMATION
-4. OBLIGATIONS OF RECEIVING PARTY
-5. EXCLUSIONS FROM CONFIDENTIAL INFORMATION
-6. TERM
-7. RETURN OR DESTRUCTION OF INFORMATION
-8. NO LICENSE
-9. NO WARRANTY
-10. REMEDIES
-11. GENERAL PROVISIONS (governing law, entire agreement, severability, waiver, amendments)
-+ signature_block
+PARTIES, PURPOSE, DEFINITION OF CONFIDENTIAL INFORMATION, OBLIGATIONS OF RECEIVING PARTY, EXCLUSIONS, TERM, RETURN OR DESTRUCTION, NO LICENSE, NO WARRANTY, REMEDIES, GENERAL PROVISIONS, then signature_block for disclosing and receiving parties.
 
 Freelance / Service Agreement:
-Scope of Work, Payment Terms, Intellectual Property, Confidentiality, Termination, Limitation of Liability, General Provisions + signature_block
+Scope of Work, Payment Terms, Intellectual Property, Confidentiality, Termination, Limitation of Liability, General Provisions + signature_block for client and provider.
 
-Employment Offer Letter:
-Position, Start Date, Compensation, Benefits, At-Will Employment, Confidentiality + signature_block
+Employment Offer Letter (when user asks for job/employment/offer letter):
+Opening (company, candidate name, offer of position), Position & Reporting, Start Date & Location, Compensation (salary/wage, pay schedule), Benefits summary (or reference to handbook), At-Will / employment status (if applicable), Conditions (background check, I-9, etc.), Confidentiality / IP (brief), Acceptance instructions + signature_block for employer representative and candidate.
 
-Include [PLACEHOLDER] tokens (like [DATE], [COMPANY NAME], [JURISDICTION]) where the user needs to fill in details.
-Make every section thorough, professional, and legally sound.
+Other agreements: infer appropriate sections from the user's request and industry norms.
+
+Include [PLACEHOLDER] tokens ([DATE], [COMPANY NAME], [CANDIDATE NAME], [JURISDICTION], etc.) where details are unknown.
+Be thorough and professional.
 
 If the user is chatting or asking a question (NOT requesting a document), respond normally WITHOUT any <DOCUMENT> block.`;
 
@@ -91,29 +90,57 @@ router.post("/chat", async (req, res) => {
     const docMatch = raw.match(/<DOCUMENT>([\s\S]*?)<\/DOCUMENT>/);
     const botMessage = raw.replace(/<DOCUMENT>[\s\S]*?<\/DOCUMENT>/, "").trim();
 
-    let documentData = null;
+    let documentDraft = null;
 
     if (docMatch) {
       try {
-        const docInfo = JSON.parse(docMatch[1].trim());
-        const pdfBytes = await generatePDF(docInfo);
-        documentData = {
-          name: `${docInfo.filename || "document"}.pdf`,
-          title: docInfo.title || "Generated Document",
-          data: Buffer.from(pdfBytes).toString("base64"),
-        };
-      } catch (pdfErr) {
-        console.error("PDF generation error:", pdfErr);
+        documentDraft = JSON.parse(docMatch[1].trim());
+      } catch (parseErr) {
+        console.error("Document JSON parse error:", parseErr);
       }
     }
 
     res.json({
-      message: botMessage || "Here is your generated document!",
-      document: documentData,
+      message:
+        botMessage ||
+        (documentDraft
+          ? "Review and edit the draft below, then generate your PDF when ready."
+          : ""),
+      documentDraft,
     });
   } catch (err) {
     console.error("OpenAI error:", err);
     res.status(500).json({ error: err.message || "AI request failed" });
+  }
+});
+
+// POST /api/ai/pdf — build PDF from client-edited document structure
+router.post("/pdf", async (req, res) => {
+  const { document: docInfo } = req.body;
+
+  if (!docInfo || typeof docInfo !== "object") {
+    return res.status(400).json({ error: "document object is required" });
+  }
+
+  try {
+    const normalized = {
+      ...docInfo,
+      title: docInfo.title || "Document",
+      filename: docInfo.filename || "document",
+      sections: Array.isArray(docInfo.sections) ? docInfo.sections : [],
+    };
+
+    const pdfBytes = await generatePDF(normalized);
+    res.json({
+      document: {
+        name: `${String(normalized.filename).replace(/\.pdf$/i, "")}.pdf`,
+        title: normalized.title || "Generated Document",
+        data: Buffer.from(pdfBytes).toString("base64"),
+      },
+    });
+  } catch (err) {
+    console.error("PDF generation error:", err);
+    res.status(500).json({ error: err.message || "PDF generation failed" });
   }
 });
 
@@ -221,25 +248,40 @@ async function generatePDF(docInfo) {
   // ── Sections ───────────────────────────────────────────────────────────────
   const sections = docInfo.sections || [];
   for (const section of sections) {
-    // Section heading
-    if (section.heading) {
+    const headingText =
+      typeof section.heading === "string" ? section.heading.trim() : "";
+    const hasHeading = headingText.length > 0;
+
+    // Section heading (skip whitespace-only)
+    if (hasHeading) {
       ensureSpace(LINE_HEIGHT_HEADING + 4);
       y -= 6;
-      const headLines = wrapText(section.heading, boldFont, HEADING_SIZE);
+      const headLines = wrapText(headingText, boldFont, HEADING_SIZE);
       for (const hl of headLines) {
         drawLine(hl, boldFont, HEADING_SIZE, MARGIN, LINE_HEIGHT_HEADING);
       }
       y -= 2;
     }
 
-    // Section body
-    if (section.body) {
-      const bodyLines = wrapText(section.body, regularFont, BODY_SIZE);
+    // Section body: full-width paragraphs when there is no heading; slight indent under a heading
+    const rawBody = typeof section.body === "string" ? section.body : "";
+    if (rawBody.trim()) {
+      if (!hasHeading) {
+        ensureSpace(LINE_HEIGHT_BODY);
+        y -= 4;
+      }
+      const bodyX = MARGIN + (hasHeading ? 12 : 0);
+      const bodyLines = wrapText(
+        rawBody,
+        regularFont,
+        BODY_SIZE,
+        bodyX - MARGIN
+      );
       for (const bl of bodyLines) {
         if (bl === "") {
-          y -= LINE_HEIGHT_BODY * 0.5;
+          y -= LINE_HEIGHT_BODY * 0.65;
         } else {
-          drawLine(bl, regularFont, BODY_SIZE, MARGIN + 12, LINE_HEIGHT_BODY);
+          drawLine(bl, regularFont, BODY_SIZE, bodyX, LINE_HEIGHT_BODY);
         }
       }
       y -= 6;
