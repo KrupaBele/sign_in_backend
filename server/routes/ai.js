@@ -50,6 +50,10 @@ Be thorough and professional.
 
 If the user is chatting or asking a question (NOT requesting a document), respond normally WITHOUT any <DOCUMENT> block.`;
 
+const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
+/** Used when the primary model returns 429 (often separate TPD bucket on Groq). */
+const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
+
 // POST /api/ai/chat
 router.post("/chat", async (req, res) => {
   const { message, history = [] } = req.body;
@@ -76,13 +80,46 @@ router.post("/chat", async (req, res) => {
     { role: "user", content: message },
   ];
 
+  const primaryModel =
+    process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL;
+  const fallbackModel =
+    process.env.GROQ_FALLBACK_MODEL?.trim() || GROQ_FALLBACK_MODEL;
+
+  const chatParams = {
+    messages,
+    temperature: 0.4,
+    max_tokens: 4096,
+  };
+
   try {
-    const completion = await openai.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
-      messages,
-      temperature: 0.4,
-      max_tokens: 4096,
-    });
+    let completion;
+    try {
+      completion = await openai.chat.completions.create({
+        ...chatParams,
+        model: primaryModel,
+      });
+    } catch (firstErr) {
+      const status = firstErr?.status ?? firstErr?.response?.status;
+      const errText = String(firstErr?.message || firstErr);
+      const isRateLimited =
+        status === 429 ||
+        /429|rate limit|tokens per day|TPD/i.test(errText);
+      if (
+        isRateLimited &&
+        fallbackModel &&
+        primaryModel !== fallbackModel
+      ) {
+        console.warn(
+          `[ai/chat] Rate limited on ${primaryModel}, retrying with ${fallbackModel}`
+        );
+        completion = await openai.chat.completions.create({
+          ...chatParams,
+          model: fallbackModel,
+        });
+      } else {
+        throw firstErr;
+      }
+    }
 
     const raw = completion.choices[0].message.content || "";
 
